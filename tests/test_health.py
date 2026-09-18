@@ -51,3 +51,36 @@ def test_render_all_clear_and_problem_table():
     assert "all clear" in render([], config)
     problems = render(run_findings("org/repo", "main", [_run("deploy", "cancelled")]), config)
     assert "1 problem" in problems and "| cancelled |" in problems
+
+
+# --- alerts -----------------------------------------------------------------
+
+from machine.health import Finding, alert_needed, fingerprint  # noqa: E402
+
+BROKEN = [Finding("TechEngine@main · weekly-refresh", "cancelled")]
+
+
+def test_new_problem_alerts():
+    assert alert_needed("", fingerprint(BROKEN))
+
+
+def test_same_problem_twice_does_not_alert_again():
+    body = f"report\n<!-- fingerprint:{fingerprint(BROKEN)} -->\n"
+    assert not alert_needed(body, fingerprint(BROKEN))
+
+
+def test_a_different_problem_alerts():
+    body = f"report\n<!-- fingerprint:{fingerprint(BROKEN)} -->\n"
+    worse = BROKEN + [Finding("TechAPI@main · deploy-pages", "failure")]
+    assert alert_needed(body, fingerprint(worse))
+
+
+def test_all_clear_never_alerts():
+    body = f"report\n<!-- fingerprint:{fingerprint(BROKEN)} -->\n"
+    assert not alert_needed(body, fingerprint([]))
+
+
+def test_fingerprint_ignores_order_and_links():
+    a = [Finding("x", "failure", "https://run/1"), Finding("y", "cancelled", "https://run/2")]
+    b = [Finding("y", "cancelled", "https://run/9"), Finding("x", "failure", "https://run/8")]
+    assert fingerprint(a) == fingerprint(b)
