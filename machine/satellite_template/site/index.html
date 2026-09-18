@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>{{title}} — GetTechAPI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; --fg: #1b1f24; --muted: #666; --bg: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e6e6; --muted: #9aa0a6; --bg: #14171a; } }
+  body { margin: 0; padding: 48px 20px; font: 15px/1.6 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p { color: var(--muted); }
+  .n { font-size: 44px; font-weight: 700; letter-spacing: -0.02em; }
+  code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 1px 5px; border-radius: 4px; }
+</style>
+<main>
+  <h1>{{title}}</h1>
+  <p>{{description}}</p>
+  <p class="n" id="count">—</p>
+  <p id="when"></p>
+  <p>
+    Records live in <code>data/{{category}}/</code> in this repository. Machine-readable
+    counts: <a href="summary.json">summary.json</a>, <a href="history.json">history.json</a>.
+  </p>
+  <p><a href="https://github.com/GetTechAPI/{{repo}}">Repository</a> · <a href="https://gettechapi.github.io/TechAPI/">TechAPI</a></p>
+</main>
+<script>
+  // No per-record listing on purpose: ~1M rows cannot be rendered in one page.
+  fetch("summary.json").then((r) => r.json()).then((d) => {
+    document.getElementById("count").textContent = d.count.toLocaleString() + " {{plural}}";
+    document.getElementById("when").textContent = "as of " + d.generated_at;
+  }).catch(() => { document.getElementById("count").textContent = "build the site first"; });
+</script>
