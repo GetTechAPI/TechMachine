@@ -1,0 +1,22 @@
+name: validate-data
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90  # 962k files; measure a real run before trimming
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate {{title}}
+        run: python -m app.validate
+      - name: Tests
+        run: |
+          pip install pytest
+          python -m pytest -q
