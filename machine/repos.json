@@ -1,0 +1,13 @@
+{
+  "repos": [
+    {"name": "GetTechAPI/TechAPI", "branches": ["develop", "main"]},
+    {"name": "GetTechAPI/TechEngine", "branches": ["main"]},
+    {"name": "GetTechAPI/game-catalog", "branches": ["develop", "main"]},
+    {"name": "GetTechAPI/cpu-engineering-samples", "branches": ["develop", "main"]}
+  ],
+  "endpoints": [
+    {"name": "TechAPI manifest", "url": "https://gettechapi.github.io/TechAPI/v1/index.json", "expect": "collections"},
+    {"name": "game-catalog summary", "url": "https://gettechapi.github.io/game-catalog/summary.json", "expect": "count"},
+    {"name": "cpu-engineering-samples summary", "url": "https://gettechapi.github.io/cpu-engineering-samples/summary.json", "expect": "count"}
+  ]
+}

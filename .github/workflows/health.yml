@@ -1,0 +1,29 @@
+name: health
+
+on:
+  schedule:
+    - cron: "0 0 * * *"   # daily, 09:00 KST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write     # keeps the single "Org health report" issue current
+  actions: read
+
+concurrency:
+  group: health
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check every repo and public endpoint
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m machine.health --issue

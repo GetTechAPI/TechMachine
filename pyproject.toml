@@ -1,0 +1,12 @@
+[project]
+name = "techmachine"
+version = "0.1.0"
+description = "Repository management for the GetTechAPI organisation"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
