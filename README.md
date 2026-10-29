@@ -20,6 +20,13 @@ It queries each workflow separately rather than scanning "the last N runs",
 because weekly jobs scroll out of any fixed window behind the daily ones — and
 the weekly jobs are the ones that go quiet.
 
+It also reads each active workflow file and reports any that uses a secret
+other than `GITHUB_TOKEN`. Automation here must act as `github-actions[bot]`,
+never as a person: workflows running under a personal token are how a
+maintainer's account got suspended. Disabling the workflow in the Actions
+settings clears the finding; a non-token secret a repository genuinely needs
+goes in that repository's `allowed_secrets` in `repos.json`.
+
 ```bash
 python -m machine.health            # print the report
 python -m machine.health --issue    # also update the issue (needs GITHUB_TOKEN)

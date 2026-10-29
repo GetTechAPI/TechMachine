@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -29,6 +30,12 @@ ISSUE_TITLE = "Org health report"
 # `cancelled` and `timed_out` included, because that is how silent failures look.
 HEALTHY = {"success", "skipped", "neutral"}
 
+# Automation must act as github-actions[bot], never as a person. Any other
+# secret in an active workflow is usually a personal token, and automation
+# running under one got a maintainer's account suspended.
+SECRET = re.compile(r"secrets\.(\w+)")
+BUILTIN_TOKEN = "GITHUB_TOKEN"
+
 
 @dataclass
 class Finding:
@@ -43,6 +50,26 @@ def _get(url: str, token: str | None) -> Any:
         request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _get_text(url: str, token: str | None) -> str:
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github.raw+json"})
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8")
+
+
+def foreign_secrets(workflow_text: str, allowed: set[str] = frozenset()) -> list[str]:
+    """Secrets a workflow uses other than the built-in token (and any allowed)."""
+    return sorted(set(SECRET.findall(workflow_text)) - {BUILTIN_TOKEN} - allowed)
+
+
+def token_finding(where: str, workflow_text: str, url: str, allowed: set[str] = frozenset()) -> Finding | None:
+    names = foreign_secrets(workflow_text, allowed)
+    if not names:
+        return None
+    return Finding(where, f"uses {', '.join(names)} — automation must not run as a person", url)
 
 
 def latest_runs(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -69,10 +96,34 @@ def endpoint_finding(name: str, url: str, expect: str, body: Any) -> Finding | N
     return None
 
 
+def workflow_token_findings(repo: str, branch: str, workflow: dict[str, Any],
+                            token: str | None, allowed: set[str]) -> list[Finding]:
+    """Flag an active workflow that reads a secret other than GITHUB_TOKEN.
+
+    Only active workflows count: disabling one in the Actions settings is
+    enough to stop it acting, and clears the finding.
+    """
+    path = workflow.get("path", "")
+    if not path.startswith(".github/workflows/"):
+        return []  # dynamic workflows such as pages-build-deployment have no file
+    where = f"{repo}@{branch} · {workflow['name']}"
+    try:
+        text = _get_text(f"{API}/repos/{repo}/contents/{path}?ref={branch}", token)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []  # the file is not on this branch
+        return [Finding(where, f"could not read workflow file: {exc}")]
+    except urllib.error.URLError as exc:
+        return [Finding(where, f"could not read workflow file: {exc}")]
+    finding = token_finding(where, text, f"https://github.com/{repo}/blob/{branch}/{path}", allowed)
+    return [finding] if finding else []
+
+
 def check(config: dict[str, Any], token: str | None) -> list[Finding]:
     findings: list[Finding] = []
     for repo in config["repos"]:
         name = repo["name"]
+        allowed = set(repo.get("allowed_secrets", []))
         try:
             workflows = _get(f"{API}/repos/{name}/actions/workflows?per_page=100", token)
         except urllib.error.URLError as exc:
@@ -92,6 +143,7 @@ def check(config: dict[str, Any], token: str | None) -> list[Finding]:
                     runs.extend(_get(url, token).get("workflow_runs", []))
                 except urllib.error.URLError as exc:
                     findings.append(Finding(f"{name} · {workflow['name']}", f"could not read runs: {exc}"))
+                findings.extend(workflow_token_findings(name, branch, workflow, token, allowed))
             findings.extend(run_findings(name, branch, runs))
 
     for endpoint in config["endpoints"]:

@@ -84,3 +84,31 @@ def test_fingerprint_ignores_order_and_links():
     a = [Finding("x", "failure", "https://run/1"), Finding("y", "cancelled", "https://run/2")]
     b = [Finding("y", "cancelled", "https://run/9"), Finding("x", "failure", "https://run/8")]
     assert fingerprint(a) == fingerprint(b)
+
+
+# --- automation must not run as a person -----------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from machine.health import foreign_secrets, token_finding  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_personal_token_is_a_problem():
+    text = "token: ${{ secrets.TECHENGINEBOT_TOKEN || secrets.TECHAPI_TOKEN }}"
+    finding = token_finding("org/repo@main · weekly-ingest", text, "https://x")
+    assert finding and "TECHAPI_TOKEN" in finding.what and "TECHENGINEBOT_TOKEN" in finding.what
+
+
+def test_builtin_token_is_fine():
+    assert token_finding("w", "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}", "https://x") is None
+
+
+def test_allowed_secret_is_fine():
+    assert foreign_secrets("${{ secrets.SOME_API_KEY }}", {"SOME_API_KEY"}) == []
+
+
+def test_techmachine_itself_uses_only_the_builtin_token():
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        assert foreign_secrets(path.read_text(encoding="utf-8")) == [], path

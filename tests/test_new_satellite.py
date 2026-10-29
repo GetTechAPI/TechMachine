@@ -58,3 +58,11 @@ def test_refuses_to_overwrite(generated: Path):
 def test_unknown_placeholder_is_an_error():
     with pytest.raises(KeyError):
         render("{{nope}}", {})
+
+
+def test_generated_workflows_use_only_the_builtin_token(generated: Path):
+    from machine.health import foreign_secrets
+    workflows = sorted((generated / ".github" / "workflows").glob("*.yml"))
+    assert workflows
+    for path in workflows:
+        assert foreign_secrets(path.read_text(encoding="utf-8")) == [], path
