@@ -40,6 +40,45 @@ When the set of problems changes, the check comments on the issue and
 It stays quiet when the same failure recurs (the fingerprint is
 workflow + result, not the run link) and never pings for an all-clear.
 
+## Final check
+
+[TechEngineBot](https://github.com/TechEngineBot) gives important pull
+requests a last look before merge. A person asks for it by adding the
+`final-check` label; the bot then posts **one** comment (later pushes edit it,
+never add another) and a `final-check` commit status that branch protection
+can require.
+
+It blocks a draft, a merge conflict, a PR into `main` that is not a release
+from `develop` or a `hotfix/`, any other check that failed or was cancelled,
+a changed workflow that uses a personal token, and a commit no other check
+ran on at all. It waits up to 30 minutes for running checks before judging.
+It never checks out or runs the PR's code.
+
+The account was suspended once for spam, so this is its only job: it speaks
+only when asked, and only once per PR.
+
+Another repository opts in with `.github/workflows/final-check.yml`:
+
+```yaml
+name: final-check
+on:
+  pull_request_target:
+    types: [labeled, synchronize, ready_for_review]
+jobs:
+  final-check:
+    uses: GetTechAPI/TechMachine/.github/workflows/final-check.yml@main
+    secrets: inherit
+```
+
+It needs a `final-check` label in that repository and the
+`TECHENGINEBOT_TOKEN` secret: a fine-grained token of the TechEngineBot
+account with read access to contents and checks, and write access to pull
+requests (comments) and commit statuses — best as an organisation secret.
+
+```bash
+python -m machine.final_check --repo GetTechAPI/TechAPI --pr 367   # print the verdict only
+```
+
 ## Satellite repositories
 
 Categories that do not belong in TechAPI live in their own repository (games:

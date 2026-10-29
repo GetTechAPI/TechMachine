@@ -1,0 +1,47 @@
+name: final-check
+
+# TechEngineBot's final check on PRs labelled `final-check`: one comment per
+# PR, edited in place, plus a `final-check` commit status. Other repositories
+# call this as a reusable workflow (see README); TechMachine uses it directly.
+#
+# pull_request_target so the bot token is available, which is safe because
+# nothing from the PR is checked out or run — only TechMachine's own code,
+# reading what the GitHub API reports about the PR.
+on:
+  pull_request_target:
+    types: [labeled, synchronize, ready_for_review]
+  workflow_call:
+    secrets:
+      TECHENGINEBOT_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-check-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  final-check:
+    # Only a person adding the label starts it; later pushes refresh the same
+    # comment while the label stays on.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'final-check') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'final-check')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: GetTechAPI/TechMachine
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Judge and post as TechEngineBot
+        env:
+          GITHUB_TOKEN: ${{ secrets.TECHENGINEBOT_TOKEN }}
+        run: >-
+          python -m machine.final_check --publish --wait-minutes 30
+          --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"

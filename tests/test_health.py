@@ -109,6 +109,11 @@ def test_allowed_secret_is_fine():
     assert foreign_secrets("${{ secrets.SOME_API_KEY }}", {"SOME_API_KEY"}) == []
 
 
+# TechEngineBot is a machine account used only for the final check.
+BOT_SECRET = {"final-check.yml": {"TECHENGINEBOT_TOKEN"}}
+
+
 def test_techmachine_itself_uses_only_the_builtin_token():
     for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        assert foreign_secrets(path.read_text(encoding="utf-8")) == [], path
+        allowed = BOT_SECRET.get(path.name, set())
+        assert foreign_secrets(path.read_text(encoding="utf-8"), allowed) == [], path
