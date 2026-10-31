@@ -6,8 +6,8 @@ TechMachine looks after the repositories that hold it.
 
 ## Health check
 
-`machine/health.py` runs daily and keeps one issue, **Org health report**,
-up to date. For every repository in [`machine/repos.json`](machine/repos.json)
+`machine/health.py` runs when a person starts it — the `health` workflow's
+*Run workflow* button, or locally. For every repository in [`machine/repos.json`](machine/repos.json)
 it reads the newest completed run of each active workflow on each tracked
 branch, and it fetches the public endpoints the TechAPI homepage depends on.
 
@@ -25,20 +25,20 @@ other than `GITHUB_TOKEN`. Automation here must act as `github-actions[bot]`,
 never as a person: workflows running under a personal token are how a
 maintainer's account got suspended. Disabling the workflow in the Actions
 settings clears the finding; a non-token secret a repository genuinely needs
-goes in that repository's `allowed_secrets` in `repos.json`.
+goes in that repository's `allowed_secrets` in `repos.json` — TechAPI's
+label-triggered final check is the one place TechEngineBot's token is allowed.
+
+It only reads. The report goes to stdout and the run's step summary; it
+writes nothing to GitHub, mentions nobody, and runs on no schedule — an
+account here was suspended over automation, and a report nobody asked for is
+how that starts.
 
 ```bash
-python -m machine.health            # print the report
-python -m machine.health --issue    # also update the issue (needs GITHUB_TOKEN)
+python -m machine.health            # print the report (GITHUB_TOKEN raises the rate limit)
 python -m pytest -q
 ```
 
 Adding a repository or endpoint is one entry in `machine/repos.json`.
-
-When the set of problems changes, the check comments on the issue and
-@-mentions `notify` from that file — editing an issue body notifies nobody.
-It stays quiet when the same failure recurs (the fingerprint is
-workflow + result, not the run link) and never pings for an all-clear.
 
 ## Satellite repositories
 
