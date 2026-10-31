@@ -1,13 +1,13 @@
 name: health
 
+# Manual only. Automation under a personal account got it suspended, so
+# nothing here runs on a schedule or writes to GitHub: the report goes to
+# this run's step summary.
 on:
-  schedule:
-    - cron: "0 0 * * *"   # daily, 09:00 KST
   workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write     # keeps the single "Org health report" issue current
   actions: read
 
 concurrency:
@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.12"
       - name: Check every repo and public endpoint
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python -m machine.health --issue
+        run: python -m machine.health

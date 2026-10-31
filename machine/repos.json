@@ -1,11 +1,13 @@
 {
-  "notify": "Seungpyo1007",
   "repos": [
     {
       "name": "GetTechAPI/TechAPI",
       "branches": [
         "develop",
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     },
     {

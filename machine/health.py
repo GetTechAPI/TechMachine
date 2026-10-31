@@ -6,7 +6,11 @@ work and dies at `git push` looks like nothing happened; a Pages deploy blocked
 by an environment rule leaves no log at all. Each of those went unnoticed for
 days. This treats anything other than success/skipped as a problem.
 
-Run with: python -m machine.health [--issue]
+It only reads. The report goes to stdout and the run's step summary; nothing
+is written to GitHub and nobody is mentioned, so it runs only when a person
+starts it.
+
+Run with: python -m machine.health
 """
 
 from __future__ import annotations
@@ -24,7 +28,6 @@ from typing import Any
 
 API = "https://api.github.com"
 CONFIG = Path(__file__).with_name("repos.json")
-ISSUE_TITLE = "Org health report"
 
 # Conclusions that mean the run did its job. Everything else is surfaced —
 # `cancelled` and `timed_out` included, because that is how silent failures look.
@@ -178,58 +181,8 @@ def render(findings: list[Finding], config: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def fingerprint(findings: list[Finding]) -> str:
-    """Stable identity of a problem set: what is broken, not when it was checked."""
-    return ",".join(sorted(f"{f.where}={f.what}" for f in findings))
-
-
-def alert_needed(previous_body: str, current: str) -> bool:
-    """Alert only when the set of problems changed — and never for all clear.
-
-    A daily ping about the same known failure trains people to ignore the
-    ping; the point is to hear about the *new* one.
-    """
-    if not current:
-        return False
-    return f"<!-- fingerprint:{current} -->" not in previous_body
-
-
-def publish(body: str, token: str, repo: str, findings: list[Finding], mention: str) -> None:
-    """Keep one open issue up to date instead of opening one per run."""
-    def call(method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
-        data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        request = urllib.request.Request(f"{API}{path}", data=data, method=method, headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        })
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8") or "null")
-
-    current = fingerprint(findings)
-    stamped = f"{body}\n<!-- fingerprint:{current} -->\n"
-
-    issues = call("GET", f"/repos/{repo}/issues?state=open&per_page=100")
-    existing = next((i for i in issues if i.get("title") == ISSUE_TITLE), None)
-    if existing:
-        number = existing["number"]
-        previous = existing.get("body") or ""
-        call("PATCH", f"/repos/{repo}/issues/{number}", {"body": stamped})
-    else:
-        number = call("POST", f"/repos/{repo}/issues", {"title": ISSUE_TITLE, "body": stamped})["number"]
-        previous = ""
-
-    # A comment, not an edit: editing an issue body notifies nobody.
-    if mention and alert_needed(previous, current):
-        lines = "\n".join(f"- {f.where}: **{f.what}**" for f in findings)
-        call("POST", f"/repos/{repo}/issues/{number}/comments",
-             {"body": f"@{mention} the org health report changed:\n\n{lines}"})
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--issue", action="store_true", help="update the health issue")
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
 
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     token = os.environ.get("GITHUB_TOKEN")
@@ -240,9 +193,6 @@ def main() -> int:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         Path(summary).write_text(report, encoding="utf-8")
-    if args.issue and token:
-        publish(report, token, os.environ.get("GITHUB_REPOSITORY", "GetTechAPI/TechMachine"),
-                findings, config.get("notify", ""))
     # The report is the output; a red run would only add a second alert.
     return 0
 
