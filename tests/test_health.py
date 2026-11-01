@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from machine.health import endpoint_finding, latest_runs, render, run_findings
+from machine.health import endpoint_finding, latest_runs, leftover_workflow, render, run_findings
 
 
 def _run(name: str, conclusion: str | None, status: str = "completed") -> dict:
@@ -38,6 +38,20 @@ def test_a_new_failure_after_a_success_is_reported():
 def test_in_progress_runs_are_ignored():
     runs = [_run("dump", None, status="in_progress"), _run("dump", "success")]
     assert latest_runs(runs)["dump"]["conclusion"] == "success"
+
+
+def test_dependabot_workflow_without_config_is_a_leftover():
+    # TechAPI removed dependabot.yml; GitHub keeps the workflow and its old runs.
+    dependabot = {"name": "Dependabot Updates", "path": "dynamic/dependabot/dependabot-updates"}
+    assert leftover_workflow(dependabot, has_dependabot_config=False)
+    assert not leftover_workflow(dependabot, has_dependabot_config=True)
+
+
+def test_other_workflows_are_never_leftovers():
+    pages = {"name": "pages-build-deployment", "path": "dynamic/pages/pages-build-deployment"}
+    ci = {"name": "test", "path": ".github/workflows/test.yml"}
+    assert not leftover_workflow(pages, has_dependabot_config=False)
+    assert not leftover_workflow(ci, has_dependabot_config=False)
 
 
 def test_endpoint_without_expected_field_is_a_problem():
