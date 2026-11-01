@@ -40,6 +40,21 @@ python -m pytest -q
 
 Adding a repository or endpoint is one entry in `machine/repos.json`.
 
+## Final check
+
+Adding the `final-check` label to a pull request asks
+[TechEngineBot](https://github.com/TechEngineBot) for a last look, in place of
+Copilot. The check job runs the tests (including a generated satellite
+repository), validates `repos.json`, and checks syntax and that every action
+is GitHub-owned and pinned by SHA. TechEngineBot then leaves **one** comment
+with the verdict; adding the label again edits it.
+
+The check job runs the PR's code with no secrets and a read-only token. Only
+the comment job sees `TECHENGINEBOT_TOKEN`, and it posts nothing unless that is
+a fine-grained token belonging to TechEngineBot. This is the only thing the
+bot account does here: it speaks when a person asks, once per PR. Same design
+as TechAPI's final check.
+
 ## Satellite repositories
 
 Categories that do not belong in TechAPI live in their own repository (games:

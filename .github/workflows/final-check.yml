@@ -1,0 +1,216 @@
+name: final-check
+
+# A maintainer adds the `final-check` label to an important PR. The check job
+# runs what TechMachine's CI checks (tests, repos.json, syntax, pinned actions)
+# and TechEngineBot leaves ONE comment with the verdict; adding the label again
+# edits that comment. Same design as TechAPI's final-check.
+#
+# The check job runs PR code, so it gets no secrets and a read-only token, and
+# nothing in it writes anywhere or reaches another repository. Only the comment
+# job sees TECHENGINEBOT_TOKEN, which must be a fine-grained token of
+# TechEngineBot with Pull requests: read and write; the job refuses any other
+# kind of token or account. Fork PRs never get a comment.
+on:
+  pull_request:
+    types: [labeled]
+    branches: [develop, main]
+
+permissions: {}
+
+jobs:
+  check:
+    if: github.event.label.name == 'final-check'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    concurrency:
+      group: final-check-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    outputs:
+      body: ${{ steps.report.outputs.body }}
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        id: install
+        continue-on-error: true
+        run: |
+          status=0
+          python -m pip install --disable-pip-version-check pytest > "$RUNNER_TEMP/install.log" 2>&1 || status=$?
+          tail -n 20 "$RUNNER_TEMP/install.log"
+          exit "$status"
+
+      # Includes generating a satellite repository and running its own tests
+      # and validator, so a template change that breaks new repos fails here.
+      - name: Tests
+        id: tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: |
+          status=0
+          python -m pytest -q -p no:cacheprovider > "$RUNNER_TEMP/tests.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/tests.log"
+          exit "$status"
+
+      - name: Validate repos.json
+        id: config
+        continue-on-error: true
+        run: |
+          status=0
+          python - > "$RUNNER_TEMP/config.log" 2>&1 <<'EOF' || status=$?
+          import json, sys
+          cfg = json.load(open("machine/repos.json", encoding="utf-8"))
+          errors = []
+          for repo in cfg.get("repos", []):
+              name = repo.get("name", "")
+              if not name.startswith("GetTechAPI/"):
+                  errors.append(f"repo {name!r} is not in GetTechAPI")
+              if not repo.get("branches"):
+                  errors.append(f"{name}: no branches")
+              if not all(isinstance(s, str) for s in repo.get("allowed_secrets", [])):
+                  errors.append(f"{name}: allowed_secrets must be strings")
+          for endpoint in cfg.get("endpoints", []):
+              if not endpoint.get("url", "").startswith("https://"):
+                  errors.append(f"{endpoint.get('name')}: url must be https")
+              if not endpoint.get("expect"):
+                  errors.append(f"{endpoint.get('name')}: no expected field")
+          if not cfg.get("repos"):
+              errors.append("no repos")
+          print("\n".join(errors) or f"{len(cfg['repos'])} repos, {len(cfg.get('endpoints', []))} endpoints")
+          sys.exit(1 if errors else 0)
+          EOF
+          cat "$RUNNER_TEMP/config.log"
+          exit "$status"
+
+      # The repository only allows GitHub-owned actions pinned by full SHA.
+      - name: Syntax and pinned actions
+        id: lint
+        continue-on-error: true
+        run: |
+          status=0
+          {
+            python -m compileall -q machine tests || status=1
+            unpinned=$(grep -nE '^\s*-?\s*uses:' .github/workflows/*.yml | grep -vE 'uses: actions/[a-z-]+@[0-9a-f]{40}( |$)' || true)
+            if [ -n "$unpinned" ]; then
+              echo "Not a GitHub-owned action pinned by SHA:"
+              echo "$unpinned"
+              status=1
+            fi
+          } > "$RUNNER_TEMP/lint.log" 2>&1
+          cat "$RUNNER_TEMP/lint.log"
+          exit "$status"
+
+      # The comment quotes tool output, which can carry text from the PR: logs
+      # stay inside code fences with backticks and @ removed, so they can
+      # neither break out into markdown nor mention anyone.
+      - name: Report
+        id: report
+        if: always()
+        env:
+          INSTALL: ${{ steps.install.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          CONFIG: ${{ steps.config.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          clean() { tr -d '`@' | cut -c1-300; }
+          fence() {  # fence <log> <lines>
+            echo '```text'
+            tail -n "$2" "$1" 2>/dev/null | clean
+            echo '```'
+          }
+          verdict='✅ Final check passed'
+          [ "$INSTALL/$TESTS/$CONFIG/$LINT" = success/success/success/success ] || verdict='❌ Final check failed'
+          {
+            echo '<!-- techmachine-final-check -->'
+            echo "### $verdict"
+            echo
+            echo "Head \`${HEAD_SHA::7}\`, checked as merged into the base · [run]($RUN_URL)"
+            echo
+            echo '| Step | Result |'
+            echo '| --- | --- |'
+            echo "| Install pytest | ${INSTALL:-skipped} |"
+            echo "| Tests (incl. a generated satellite repo) | ${TESTS:-skipped} |"
+            echo "| repos.json | ${CONFIG:-skipped} |"
+            echo "| Syntax and pinned actions | ${LINT:-skipped} |"
+            [ "$INSTALL" = failure ] && { echo; echo '<details><summary>Install log</summary>'; echo; fence "$RUNNER_TEMP/install.log" 20; echo '</details>'; }
+            [ "$TESTS" = failure ] && { echo; echo '<details><summary>Test log</summary>'; echo; fence "$RUNNER_TEMP/tests.log" 40; echo '</details>'; }
+            [ "$CONFIG" = failure ] && { echo; echo '<details><summary>repos.json log</summary>'; echo; fence "$RUNNER_TEMP/config.log" 20; echo '</details>'; }
+            [ "$LINT" = failure ] && { echo; echo '<details><summary>Syntax and pinned actions log</summary>'; echo; fence "$RUNNER_TEMP/lint.log" 20; echo '</details>'; }
+            true
+          } > "$RUNNER_TEMP/body.md"
+          cat "$RUNNER_TEMP/body.md" >> "$GITHUB_STEP_SUMMARY"
+          delim="BODY_$(openssl rand -hex 16)"
+          { echo "body<<$delim"; cat "$RUNNER_TEMP/body.md"; echo "$delim"; } >> "$GITHUB_OUTPUT"
+          [ "$verdict" = '✅ Final check passed' ]
+
+  comment:
+    needs: check
+    if: >-
+      always() && github.event.label.name == 'final-check' &&
+      (needs.check.result == 'success' || needs.check.result == 'failure') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check the token
+        id: token
+        env:
+          TOKEN: ${{ secrets.TECHENGINEBOT_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::TECHENGINEBOT_TOKEN is not set; the verdict is in the check job's summary only."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$TOKEN" in
+            github_pat_*) echo "ok=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::TECHENGINEBOT_TOKEN must be a fine-grained token (github_pat_...) of TechEngineBot with Pull requests: read and write."
+               exit 1 ;;
+          esac
+
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        if: steps.token.outputs.ok == 'true'
+        env:
+          BODY: ${{ needs.check.outputs.body }}
+          PR: ${{ github.event.pull_request.number }}
+        with:
+          github-token: ${{ secrets.TECHENGINEBOT_TOKEN }}
+          script: |
+            const marker = '<!-- techmachine-final-check -->';
+            const body = process.env.BODY || '';
+            if (!body.startsWith(marker)) {
+              core.setFailed('The check job produced no report; nothing posted.');
+              return;
+            }
+            const { data: me } = await github.rest.users.getAuthenticated();
+            if (me.login !== 'TechEngineBot') {
+              core.setFailed(`TECHENGINEBOT_TOKEN belongs to ${me.login}, not TechEngineBot; nothing posted.`);
+              return;
+            }
+            const { owner, repo } = context.repo;
+            const issue_number = Number(process.env.PR);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const mine = comments.find((c) => c.user?.login === me.login && c.body?.startsWith(marker));
+            if (!mine) {
+              const { data } = await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              core.info(`Posted ${data.html_url}`);
+            } else if (mine.body !== body) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+              core.info(`Updated ${mine.html_url}`);
+            } else {
+              core.info(`Unchanged: ${mine.html_url}`);
+            }
