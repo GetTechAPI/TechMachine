@@ -192,7 +192,7 @@ jobs:
             // The check job ran the PR's code, so its report is untrusted here:
             // drop every @ and break issue references and issue/PR links, so the
             // comment can neither mention anyone nor cross-reference anything.
-            const zw = '​';
+            const zw = String.fromCharCode(0x200b); // zero-width space
             const body = (process.env.BODY || '')
               .replace(/@/g, '')
               .replace(/(?<!&)#(?=\d+\b)/g, `#${zw}`)
