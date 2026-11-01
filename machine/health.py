@@ -7,9 +7,9 @@ by an environment rule leaves no log at all. Each of those went unnoticed for
 days. This treats anything other than success/skipped as a problem.
 
 One exception: GitHub's dynamic "Dependabot Updates" workflow cannot be
-disabled, and its old runs outlive the `.github/dependabot.yml` that started
-them. Without that file no version update can run, so in a repository that
-has none the workflow is skipped as a leftover.
+disabled, and its old runs outlive the `.github/dependabot.yml` (or `.yaml`)
+that started them. Without that file no version update can run, so in a
+repository that has neither the workflow is skipped as a leftover.
 
 It only reads. The report goes to stdout and the run's step summary; nothing
 is written to GitHub and nobody is mentioned, so it runs only when a person
@@ -46,6 +46,7 @@ BUILTIN_TOKEN = "GITHUB_TOKEN"
 
 # GitHub's own workflow for Dependabot, present even after its config is gone.
 DEPENDABOT_WORKFLOW = "dynamic/dependabot/"
+DEPENDABOT_CONFIGS = ("dependabot.yml", "dependabot.yaml")
 
 
 @dataclass
@@ -131,18 +132,23 @@ def workflow_token_findings(repo: str, branch: str, workflow: dict[str, Any],
 
 
 def dependabot_configured(repo: str, token: str | None) -> bool:
-    """Whether the repository has `.github/dependabot.yml` on its default branch.
+    """Whether the repository has `.github/dependabot.yml` or `.yaml` on its default branch.
 
-    A 404 means it has none. Any other failure counts as configured, so a
-    lookup that went wrong never hides a real Dependabot failure.
+    GitHub accepts either name, so `.yaml` is tried only when `.yml` is a 404,
+    and only two 404s mean there is none. Any other failure counts as
+    configured, so a lookup that went wrong never hides a real Dependabot failure.
     """
-    try:
-        _get(f"{API}/repos/{repo}/contents/.github/dependabot.yml", token)
-    except urllib.error.HTTPError as exc:
-        return exc.code != 404
-    except urllib.error.URLError:
+    for name in DEPENDABOT_CONFIGS:
+        try:
+            _get(f"{API}/repos/{repo}/contents/.github/{name}", token)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                continue
+            return True
+        except urllib.error.URLError:
+            return True
         return True
-    return True
+    return False
 
 
 def leftover_workflow(workflow: dict[str, Any], has_dependabot_config: bool) -> bool:
