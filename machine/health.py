@@ -6,6 +6,11 @@ work and dies at `git push` looks like nothing happened; a Pages deploy blocked
 by an environment rule leaves no log at all. Each of those went unnoticed for
 days. This treats anything other than success/skipped as a problem.
 
+One exception: GitHub's dynamic "Dependabot Updates" workflow cannot be
+disabled, and its old runs outlive the `.github/dependabot.yml` that started
+them. Without that file no version update can run, so in a repository that
+has none the workflow is skipped as a leftover.
+
 It only reads. The report goes to stdout and the run's step summary; nothing
 is written to GitHub and nobody is mentioned, so it runs only when a person
 starts it.
@@ -38,6 +43,9 @@ HEALTHY = {"success", "skipped", "neutral"}
 # running under one got a maintainer's account suspended.
 SECRET = re.compile(r"secrets\.(\w+)")
 BUILTIN_TOKEN = "GITHUB_TOKEN"
+
+# GitHub's own workflow for Dependabot, present even after its config is gone.
+DEPENDABOT_WORKFLOW = "dynamic/dependabot/"
 
 
 @dataclass
@@ -122,6 +130,26 @@ def workflow_token_findings(repo: str, branch: str, workflow: dict[str, Any],
     return [finding] if finding else []
 
 
+def dependabot_configured(repo: str, token: str | None) -> bool:
+    """Whether the repository has `.github/dependabot.yml` on its default branch.
+
+    A 404 means it has none. Any other failure counts as configured, so a
+    lookup that went wrong never hides a real Dependabot failure.
+    """
+    try:
+        _get(f"{API}/repos/{repo}/contents/.github/dependabot.yml", token)
+    except urllib.error.HTTPError as exc:
+        return exc.code != 404
+    except urllib.error.URLError:
+        return True
+    return True
+
+
+def leftover_workflow(workflow: dict[str, Any], has_dependabot_config: bool) -> bool:
+    """Dependabot's dynamic workflow in a repository with no Dependabot config."""
+    return workflow.get("path", "").startswith(DEPENDABOT_WORKFLOW) and not has_dependabot_config
+
+
 def check(config: dict[str, Any], token: str | None) -> list[Finding]:
     findings: list[Finding] = []
     for repo in config["repos"]:
@@ -132,13 +160,17 @@ def check(config: dict[str, Any], token: str | None) -> list[Finding]:
         except urllib.error.URLError as exc:
             findings.append(Finding(name, f"could not list workflows: {exc}"))
             continue
+        # One lookup per repository, and only if Dependabot's workflow is there.
+        has_dependabot_config = not any(
+            w.get("path", "").startswith(DEPENDABOT_WORKFLOW) for w in workflows.get("workflows", [])
+        ) or dependabot_configured(name, token)
         for branch in repo["branches"]:
             # One query per workflow, not "the last N runs": a weekly job would
             # scroll out of any fixed window behind the daily ones, and weekly
             # jobs are exactly the ones that fail unnoticed.
             runs: list[dict[str, Any]] = []
             for workflow in workflows.get("workflows", []):
-                if workflow.get("state") != "active":
+                if workflow.get("state") != "active" or leftover_workflow(workflow, has_dependabot_config):
                     continue
                 url = (f"{API}/repos/{name}/actions/workflows/{workflow['id']}/runs"
                        f"?branch={branch}&status=completed&per_page=1")
