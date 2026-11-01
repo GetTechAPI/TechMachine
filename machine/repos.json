@@ -14,6 +14,9 @@
       "name": "GetTechAPI/TechEngine",
       "branches": [
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     },
     {
@@ -21,6 +24,9 @@
       "branches": [
         "develop",
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     },
     {
@@ -28,6 +34,9 @@
       "branches": [
         "develop",
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     }
   ],
