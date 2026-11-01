@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import urllib.error
+
+from machine import health
+
 from machine.health import endpoint_finding, latest_runs, leftover_workflow, render, run_findings
 
 
@@ -45,6 +49,31 @@ def test_dependabot_workflow_without_config_is_a_leftover():
     dependabot = {"name": "Dependabot Updates", "path": "dynamic/dependabot/dependabot-updates"}
     assert leftover_workflow(dependabot, has_dependabot_config=False)
     assert not leftover_workflow(dependabot, has_dependabot_config=True)
+
+
+def _contents(present: set[str]):
+    """A stand-in for `_get` where only the named .github files exist."""
+    def get(url: str, token: str | None) -> dict:
+        if url.rsplit("/", 1)[1] not in present:
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+        return {}
+    return get
+
+
+def test_either_dependabot_file_counts_as_configured(monkeypatch):
+    monkeypatch.setattr(health, "_get", _contents({"dependabot.yml"}))
+    assert health.dependabot_configured("org/repo", None)
+    monkeypatch.setattr(health, "_get", _contents({"dependabot.yaml"}))
+    assert health.dependabot_configured("org/repo", None)
+    monkeypatch.setattr(health, "_get", _contents(set()))
+    assert not health.dependabot_configured("org/repo", None)
+
+
+def test_a_failed_lookup_keeps_dependabot_checked(monkeypatch):
+    def forbidden(url: str, token: str | None) -> dict:
+        raise urllib.error.HTTPError(url, 403, "Forbidden", None, None)
+    monkeypatch.setattr(health, "_get", forbidden)
+    assert health.dependabot_configured("org/repo", None)
 
 
 def test_other_workflows_are_never_leftovers():
