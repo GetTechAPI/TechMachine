@@ -22,6 +22,40 @@ def generated(tmp_path: Path) -> Path:
     return out
 
 
+# Everything a new satellite starts with. A template change shows up here, so
+# adding, renaming or dropping a generated file is a deliberate edit.
+EXPECTED_FILES = [
+    ".github/CODEOWNERS",
+    ".github/pull_request_template.md",
+    ".github/workflows/deploy-pages.yml",
+    ".github/workflows/final-check.yml",
+    ".github/workflows/validate-data.yml",
+    ".gitignore",
+    "DATA_LICENSE.md",
+    "LICENSE",
+    "README.md",
+    "app/__init__.py",
+    "app/validate.py",
+    "pyproject.toml",
+    "site/.nojekyll",
+    "site/build.py",
+    "site/index.html",
+    "tests/test_validate.py",
+]
+
+
+def test_generated_tree_is_the_expected_file_list(generated: Path):
+    files = sorted(p.relative_to(generated).as_posix() for p in generated.rglob("*") if p.is_file())
+    assert files == sorted(EXPECTED_FILES)
+    assert (generated / "data" / "demo").is_dir()
+
+
+def test_generated_metadata_is_filled_in(generated: Path):
+    assert "* @GetTechAPI/maintainers" in (generated / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+    template = (generated / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
+    assert "data(demo):" in template and "{{" not in template
+
+
 def test_no_placeholder_survives(generated: Path):
     for path in generated.rglob("*"):
         if path.is_file() and path.suffix in {".py", ".md", ".toml", ".yml", ".html"}:
