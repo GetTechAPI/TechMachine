@@ -38,6 +38,22 @@
       "allowed_secrets": [
         "TECHENGINEBOT_TOKEN"
       ]
+    },
+    {
+      "name": "GetTechAPI/.github",
+      "branches": [
+        "main"
+      ]
+    },
+    {
+      "name": "GetTechAPI/TechMachine",
+      "branches": [
+        "develop",
+        "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
+      ]
     }
   ],
   "endpoints": [
