@@ -60,9 +60,29 @@ def test_unknown_placeholder_is_an_error():
         render("{{nope}}", {})
 
 
-def test_generated_workflows_use_only_the_builtin_token(generated: Path):
+# TechEngineBot's token is allowed in one place: the label-triggered final check.
+BOT_SECRET = {"final-check.yml": {"TECHENGINEBOT_TOKEN"}}
+
+
+def test_generated_workflows_use_the_bot_token_only_in_final_check(generated: Path):
     from machine.health import foreign_secrets
     workflows = sorted((generated / ".github" / "workflows").glob("*.yml"))
     assert workflows
     for path in workflows:
-        assert foreign_secrets(path.read_text(encoding="utf-8")) == [], path
+        text = path.read_text(encoding="utf-8")
+        assert foreign_secrets(text, BOT_SECRET.get(path.name, set())) == [], path
+    final_check = (generated / ".github" / "workflows" / "final-check.yml").read_text(encoding="utf-8")
+    assert foreign_secrets(final_check) == ["TECHENGINEBOT_TOKEN"]
+
+
+def test_generated_final_check_is_named_after_the_repo(generated: Path):
+    text = (generated / ".github" / "workflows" / "final-check.yml").read_text(encoding="utf-8")
+    assert text.count("<!-- demo-catalog-final-check -->") == 2
+    assert "data/demo " in text
+
+
+def test_checklist_registers_the_repo_with_the_bot_secret():
+    from machine.new_satellite import checklist
+    text = checklist({"repo": "demo-catalog", "plural": "demos"})
+    assert '"allowed_secrets": ["TECHENGINEBOT_TOKEN"]' in text
+    assert "final-check" in text
