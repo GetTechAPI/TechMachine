@@ -83,6 +83,42 @@ def test_other_workflows_are_never_leftovers():
     assert not leftover_workflow(ci, has_dependabot_config=False)
 
 
+def test_a_repo_without_workflows_or_endpoints_is_clean(monkeypatch):
+    # The org profile repo (.github) holds community files only: no workflows,
+    # no Pages. One listing call, nothing else, and no finding.
+    calls = []
+
+    def get(url: str, token: str | None) -> dict:
+        calls.append(url)
+        return {"total_count": 0, "workflows": []}
+    monkeypatch.setattr(health, "_get", get)
+    config = {"repos": [{"name": "org/.github", "branches": ["main"]}], "endpoints": []}
+    assert health.check(config, None) == []
+    assert calls == [f"{health.API}/repos/org/.github/actions/workflows?per_page=100"]
+    assert "Checked .github and 0 public endpoints" in render([], config)
+
+
+def test_a_repo_that_cannot_be_listed_is_reported(monkeypatch):
+    def missing(url: str, token: str | None) -> dict:
+        raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+    monkeypatch.setattr(health, "_get", missing)
+    config = {"repos": [{"name": "org/gone", "branches": ["main"]}], "endpoints": []}
+    findings = health.check(config, None)
+    assert [f.where for f in findings] == ["org/gone"]
+    assert "could not list workflows" in findings[0].what
+
+
+def test_repos_json_is_well_formed():
+    import json
+    config = json.loads(health.CONFIG.read_text(encoding="utf-8"))
+    names = [repo["name"] for repo in config["repos"]]
+    assert len(names) == len(set(names))
+    for repo in config["repos"]:
+        assert repo["name"].startswith("GetTechAPI/") and repo["branches"], repo
+    for endpoint in config["endpoints"]:
+        assert endpoint["url"].startswith("https://") and endpoint["expect"], endpoint
+
+
 def test_endpoint_without_expected_field_is_a_problem():
     assert endpoint_finding("summary", "https://x", "count", {"other": 1})
     assert endpoint_finding("summary", "https://x", "count", "<html>404</html>")
