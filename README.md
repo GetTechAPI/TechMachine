@@ -98,7 +98,7 @@ python -m machine.new_satellite --repo game-catalog --category game \
 ### What it generates
 
 ```
-.github/CODEOWNERS                    # * @GetTechAPI/maintainers
+.github/CODEOWNERS                    # * @Seungpyo1007
 .github/pull_request_template.md
 .github/workflows/validate-data.yml   # validator + tests on PRs and pushes to develop/main
 .github/workflows/deploy-pages.yml    # builds and publishes the site from main
