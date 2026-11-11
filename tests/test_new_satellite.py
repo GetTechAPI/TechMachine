@@ -51,7 +51,7 @@ def test_generated_tree_is_the_expected_file_list(generated: Path):
 
 
 def test_generated_metadata_is_filled_in(generated: Path):
-    assert "* @GetTechAPI/maintainers" in (generated / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+    assert "* @Seungpyo1007" in (generated / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
     template = (generated / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
     assert "data(demo):" in template and "{{" not in template
 
