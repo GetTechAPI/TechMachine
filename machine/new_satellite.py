@@ -122,10 +122,15 @@ Next steps (not automated — each changes the org):
   3. gh api -X POST repos/{repo}/pages -f build_type=workflow
   4. gh api -X POST repos/{repo}/environments/github-pages/deployment-branch-policies -f name=main
      (skip this and every deploy fails with no log — game-catalog, 2026-09-17)
-  5. add {{"name": "{repo}", "branches": ["develop", "main"]}} to TechMachine machine/repos.json
+  5. add {{"name": "{repo}", "branches": ["develop", "main"],
+     "allowed_secrets": ["TECHENGINEBOT_TOKEN"]}} to TechMachine machine/repos.json
      and the summary.json URL to its endpoints
   6. add {{ key: "{v['plural']}", label: "{v['plural']}", base: "https://gettechapi.github.io/{v['repo']}/" }}
      to SATELLITES in TechAPI site/src/scripts/techapi.js
+  7. for the final check: create the `final-check` label and set the
+     TECHENGINEBOT_TOKEN secret to a fine-grained token of TechEngineBot with
+     Pull requests: read and write on {repo} only. Without the secret the
+     verdict stays in the run summary and nothing is posted.
 """
 
 

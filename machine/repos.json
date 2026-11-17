@@ -1,17 +1,22 @@
 {
-  "notify": "Seungpyo1007",
   "repos": [
     {
       "name": "GetTechAPI/TechAPI",
       "branches": [
         "develop",
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     },
     {
       "name": "GetTechAPI/TechEngine",
       "branches": [
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     },
     {
@@ -19,6 +24,9 @@
       "branches": [
         "develop",
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     },
     {
@@ -26,6 +34,25 @@
       "branches": [
         "develop",
         "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
+      ]
+    },
+    {
+      "name": "GetTechAPI/.github",
+      "branches": [
+        "main"
+      ]
+    },
+    {
+      "name": "GetTechAPI/TechMachine",
+      "branches": [
+        "develop",
+        "main"
+      ],
+      "allowed_secrets": [
+        "TECHENGINEBOT_TOKEN"
       ]
     }
   ],

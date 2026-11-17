@@ -6,7 +6,16 @@ work and dies at `git push` looks like nothing happened; a Pages deploy blocked
 by an environment rule leaves no log at all. Each of those went unnoticed for
 days. This treats anything other than success/skipped as a problem.
 
-Run with: python -m machine.health [--issue]
+One exception: GitHub's dynamic "Dependabot Updates" workflow cannot be
+disabled, and its old runs outlive the `.github/dependabot.yml` (or `.yaml`)
+that started them. Without that file no version update can run, so in a
+repository that has neither the workflow is skipped as a leftover.
+
+It only reads. The report goes to stdout and the run's step summary; nothing
+is written to GitHub and nobody is mentioned, so it runs only when a person
+starts it.
+
+Run with: python -m machine.health
 """
 
 from __future__ import annotations
@@ -14,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -23,11 +33,20 @@ from typing import Any
 
 API = "https://api.github.com"
 CONFIG = Path(__file__).with_name("repos.json")
-ISSUE_TITLE = "Org health report"
 
 # Conclusions that mean the run did its job. Everything else is surfaced —
 # `cancelled` and `timed_out` included, because that is how silent failures look.
 HEALTHY = {"success", "skipped", "neutral"}
+
+# Automation must act as github-actions[bot], never as a person. Any other
+# secret in an active workflow is usually a personal token, and automation
+# running under one got a maintainer's account suspended.
+SECRET = re.compile(r"secrets\.(\w+)")
+BUILTIN_TOKEN = "GITHUB_TOKEN"
+
+# GitHub's own workflow for Dependabot, present even after its config is gone.
+DEPENDABOT_WORKFLOW = "dynamic/dependabot/"
+DEPENDABOT_CONFIGS = ("dependabot.yml", "dependabot.yaml")
 
 
 @dataclass
@@ -43,6 +62,26 @@ def _get(url: str, token: str | None) -> Any:
         request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _get_text(url: str, token: str | None) -> str:
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github.raw+json"})
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8")
+
+
+def foreign_secrets(workflow_text: str, allowed: set[str] = frozenset()) -> list[str]:
+    """Secrets a workflow uses other than the built-in token (and any allowed)."""
+    return sorted(set(SECRET.findall(workflow_text)) - {BUILTIN_TOKEN} - allowed)
+
+
+def token_finding(where: str, workflow_text: str, url: str, allowed: set[str] = frozenset()) -> Finding | None:
+    names = foreign_secrets(workflow_text, allowed)
+    if not names:
+        return None
+    return Finding(where, f"uses {', '.join(names)} — automation must not run as a person", url)
 
 
 def latest_runs(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -69,22 +108,75 @@ def endpoint_finding(name: str, url: str, expect: str, body: Any) -> Finding | N
     return None
 
 
+def workflow_token_findings(repo: str, branch: str, workflow: dict[str, Any],
+                            token: str | None, allowed: set[str]) -> list[Finding]:
+    """Flag an active workflow that reads a secret other than GITHUB_TOKEN.
+
+    Only active workflows count: disabling one in the Actions settings is
+    enough to stop it acting, and clears the finding.
+    """
+    path = workflow.get("path", "")
+    if not path.startswith(".github/workflows/"):
+        return []  # dynamic workflows such as pages-build-deployment have no file
+    where = f"{repo}@{branch} · {workflow['name']}"
+    try:
+        text = _get_text(f"{API}/repos/{repo}/contents/{path}?ref={branch}", token)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []  # the file is not on this branch
+        return [Finding(where, f"could not read workflow file: {exc}")]
+    except urllib.error.URLError as exc:
+        return [Finding(where, f"could not read workflow file: {exc}")]
+    finding = token_finding(where, text, f"https://github.com/{repo}/blob/{branch}/{path}", allowed)
+    return [finding] if finding else []
+
+
+def dependabot_configured(repo: str, token: str | None) -> bool:
+    """Whether the repository has `.github/dependabot.yml` or `.yaml` on its default branch.
+
+    GitHub accepts either name, so `.yaml` is tried only when `.yml` is a 404,
+    and only two 404s mean there is none. Any other failure counts as
+    configured, so a lookup that went wrong never hides a real Dependabot failure.
+    """
+    for name in DEPENDABOT_CONFIGS:
+        try:
+            _get(f"{API}/repos/{repo}/contents/.github/{name}", token)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                continue
+            return True
+        except urllib.error.URLError:
+            return True
+        return True
+    return False
+
+
+def leftover_workflow(workflow: dict[str, Any], has_dependabot_config: bool) -> bool:
+    """Dependabot's dynamic workflow in a repository with no Dependabot config."""
+    return workflow.get("path", "").startswith(DEPENDABOT_WORKFLOW) and not has_dependabot_config
+
+
 def check(config: dict[str, Any], token: str | None) -> list[Finding]:
     findings: list[Finding] = []
     for repo in config["repos"]:
         name = repo["name"]
+        allowed = set(repo.get("allowed_secrets", []))
         try:
             workflows = _get(f"{API}/repos/{name}/actions/workflows?per_page=100", token)
         except urllib.error.URLError as exc:
             findings.append(Finding(name, f"could not list workflows: {exc}"))
             continue
+        # One lookup per repository, and only if Dependabot's workflow is there.
+        has_dependabot_config = not any(
+            w.get("path", "").startswith(DEPENDABOT_WORKFLOW) for w in workflows.get("workflows", [])
+        ) or dependabot_configured(name, token)
         for branch in repo["branches"]:
             # One query per workflow, not "the last N runs": a weekly job would
             # scroll out of any fixed window behind the daily ones, and weekly
             # jobs are exactly the ones that fail unnoticed.
             runs: list[dict[str, Any]] = []
             for workflow in workflows.get("workflows", []):
-                if workflow.get("state") != "active":
+                if workflow.get("state") != "active" or leftover_workflow(workflow, has_dependabot_config):
                     continue
                 url = (f"{API}/repos/{name}/actions/workflows/{workflow['id']}/runs"
                        f"?branch={branch}&status=completed&per_page=1")
@@ -92,6 +184,7 @@ def check(config: dict[str, Any], token: str | None) -> list[Finding]:
                     runs.extend(_get(url, token).get("workflow_runs", []))
                 except urllib.error.URLError as exc:
                     findings.append(Finding(f"{name} · {workflow['name']}", f"could not read runs: {exc}"))
+                findings.extend(workflow_token_findings(name, branch, workflow, token, allowed))
             findings.extend(run_findings(name, branch, runs))
 
     for endpoint in config["endpoints"]:
@@ -126,58 +219,8 @@ def render(findings: list[Finding], config: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def fingerprint(findings: list[Finding]) -> str:
-    """Stable identity of a problem set: what is broken, not when it was checked."""
-    return ",".join(sorted(f"{f.where}={f.what}" for f in findings))
-
-
-def alert_needed(previous_body: str, current: str) -> bool:
-    """Alert only when the set of problems changed — and never for all clear.
-
-    A daily ping about the same known failure trains people to ignore the
-    ping; the point is to hear about the *new* one.
-    """
-    if not current:
-        return False
-    return f"<!-- fingerprint:{current} -->" not in previous_body
-
-
-def publish(body: str, token: str, repo: str, findings: list[Finding], mention: str) -> None:
-    """Keep one open issue up to date instead of opening one per run."""
-    def call(method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
-        data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        request = urllib.request.Request(f"{API}{path}", data=data, method=method, headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        })
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8") or "null")
-
-    current = fingerprint(findings)
-    stamped = f"{body}\n<!-- fingerprint:{current} -->\n"
-
-    issues = call("GET", f"/repos/{repo}/issues?state=open&per_page=100")
-    existing = next((i for i in issues if i.get("title") == ISSUE_TITLE), None)
-    if existing:
-        number = existing["number"]
-        previous = existing.get("body") or ""
-        call("PATCH", f"/repos/{repo}/issues/{number}", {"body": stamped})
-    else:
-        number = call("POST", f"/repos/{repo}/issues", {"title": ISSUE_TITLE, "body": stamped})["number"]
-        previous = ""
-
-    # A comment, not an edit: editing an issue body notifies nobody.
-    if mention and alert_needed(previous, current):
-        lines = "\n".join(f"- {f.where}: **{f.what}**" for f in findings)
-        call("POST", f"/repos/{repo}/issues/{number}/comments",
-             {"body": f"@{mention} the org health report changed:\n\n{lines}"})
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--issue", action="store_true", help="update the health issue")
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args()
 
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     token = os.environ.get("GITHUB_TOKEN")
@@ -188,9 +231,6 @@ def main() -> int:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         Path(summary).write_text(report, encoding="utf-8")
-    if args.issue and token:
-        publish(report, token, os.environ.get("GITHUB_REPOSITORY", "GetTechAPI/TechMachine"),
-                findings, config.get("notify", ""))
     # The report is the output; a red run would only add a second alert.
     return 0
 
